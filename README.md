@@ -51,13 +51,15 @@ These work on every command, before or after the subcommand.
 
 ## Commands
 
+Asset ids are always positional. `--library` selects the library when the key can reach more than one. `raster <command> --help` lists every flag.
+
 ### `auth`
 
-| Command | Description |
-| --- | --- |
-| `raster auth login` | Validate an API key and store it. Pass `--api-key <key>`, or run interactively to be prompted. |
-| `raster auth logout` | Remove the stored API key. |
-| `raster auth status` | Show which key is in use, its source, and the organization it reaches. |
+| Command | Description | Example |
+| --- | --- | --- |
+| `raster auth login` | Validate an API key and store it (`--api-key`, or an interactive prompt). | `raster auth login` |
+| `raster auth logout` | Remove the stored API key. | `raster auth logout` |
+| `raster auth status` | Show which key is in use, its source, and the organization it reaches. | `raster auth status` |
 
 ### `whoami`
 
@@ -69,34 +71,32 @@ Show the organization, plan, and libraries the API key can access.
 
 ### `libraries`
 
-| Command | Description | Flags |
+| Command | Description | Example |
 | --- | --- | --- |
-| `raster libraries ls` | List libraries in the organization. | `--page <n>`, `--page-size <n>` |
-| `raster libraries create` | Create a library. | `--name <name>` (required), `--slug <slug>` |
-| `raster libraries rename` | Rename the library (`--library`, or the key's only one). | `--name <name>` (required) |
+| `raster libraries ls` | List libraries in the organization (`--page`, `--page-size`). | `raster libraries ls` |
+| `raster libraries create --name <name>` | Create a library (`--slug` optional). | `raster libraries create --name "Brand"` |
+| `raster libraries rename --name <name>` | Rename the library. | `raster libraries rename --name "Brand assets"` |
 
 ### `assets`
 
-Asset ids are always positional. `--library` selects the library when the key has more than one.
-
-| Command | Description | Flags |
+| Command | Description | Example |
 | --- | --- | --- |
-| `raster assets ls` | List assets in the library. | `--page <n>`, `--page-size <n>`, `--tag <tag...>` (repeatable, up to 5) |
-| `raster assets get <assetId>` | Show one asset's metadata. | — |
-| `raster assets search <query>` | Search assets across the organization (`--library` scopes to one). | `--page <n>`, `--page-size <n>` |
-| `raster assets download <assetId>` | Download the asset's file to disk. | `-o, --output <path>`, `--force` |
-| `raster assets upload <files...>` | Upload local files (batched at 20 per request). | — |
-| `raster assets rm <assetIds...>` | Move assets to trash (recoverable). | `--yes` (skip the confirm prompt) |
-| `raster assets describe <assetId>` | Set an asset's description. | `--text <description>` (required) |
-| `raster assets transfer <assetIds...>` | Move assets to another library. | `--to <libraryId>` (required) |
+| `raster assets ls` | List assets; filter with `--tag` (up to 5), page with `--page`/`--page-size`. | `raster assets ls --library brand --tag sunset` |
+| `raster assets get <assetId>` | Show one asset's metadata. | `raster assets get asset_123` |
+| `raster assets search <query>` | Search across the organization (`--library` scopes to one). | `raster assets search "golden hour"` |
+| `raster assets download <assetId>` | Download the file (`-o` path, `--force` to overwrite). | `raster assets download asset_123 -o photo.png` |
+| `raster assets upload <files...>` | Upload local files (batched at 20 per request). | `raster assets upload ./photos/*.png` |
+| `raster assets rm <assetIds...>` | Move assets to trash (`--yes` skips the prompt). | `raster assets rm asset_123 asset_456` |
+| `raster assets describe <assetId> --text <text>` | Set an asset's description. | `raster assets describe asset_123 --text "Hero shot"` |
+| `raster assets transfer <assetIds...> --to <libraryId>` | Move assets to another library. | `raster assets transfer asset_123 --to archive` |
 
 ### `tags`
 
-| Command | Description | Flags |
+| Command | Description | Example |
 | --- | --- | --- |
-| `raster tags ls` | List tags in the library. | `--limit <n>` |
-| `raster tags add <assetIds...>` | Add tags to assets. | `--tag <tag...>` (required, repeatable) |
-| `raster tags rm <assetIds...>` | Remove tags from assets. | `--tag <tag...>` (required, repeatable) |
+| `raster tags ls` | List tags in the library (`--limit`). | `raster tags ls --library brand` |
+| `raster tags add <assetIds...> --tag <tag...>` | Add tags to assets. | `raster tags add asset_123 --tag launch` |
+| `raster tags rm <assetIds...> --tag <tag...>` | Remove tags from assets. | `raster tags rm asset_123 --tag launch` |
 
 ### `orgs`
 
@@ -104,22 +104,11 @@ Asset ids are always positional. `--library` selects the library when the key ha
 raster orgs create --email <email> [--name <name>] [--save]
 ```
 
-Create a library with no account (held 30 days until claimed). Prints the claim URL; `--save` stores the minted key. Anonymous — sends no API key.
-
-## Examples
-
-```sh
-raster libraries ls
-raster assets ls --library brand --tag sunset
-raster assets upload --library brand ./photos/*.png
-raster assets search "golden hour" --json | jq '.hits[].id'
-raster tags add asset_123 asset_456 --tag launch --library brand
-raster assets transfer asset_123 --to archive --library brand
-```
+Create an organization and library with no account (held 30 days until claimed). Prints the claim URL; `--save` stores the minted key. Anonymous — sends no API key.
 
 ## Output and scripting
 
-Human-readable tables print to stdout; progress and notes go to stderr, so stdout stays pipeable. `--json` prints only the raw API payload to stdout. `--verbose` logs each request to stderr with the key masked.
+Human-readable tables print to stdout; progress and notes go to stderr, so stdout stays pipeable. Add `--json` for machine-readable output — e.g. `raster assets search "sunset" --json | jq '.hits[].id'`.
 
 ## Exit codes
 
