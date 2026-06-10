@@ -4,15 +4,27 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write # npm provenance
+  contents: write # push the version tag, create the GitHub release
+  id-token: write # OIDC for npm Trusted Publishing
 
 jobs:
   publish:
-    # arm64 runner — compiles the darwin-arm64 binary natively (v1 target)
-    runs-on: macos-14
+    runs-on: macos-14 # arm64 — compiles the darwin-arm64 binary natively
+    # Required-reviewer gate. This name MUST match the Environment configured on
+    # the npm Trusted Publisher, so npm only accepts a publish from this environment.
+    environment: release
     steps:
       - uses: actions/checkout@v4
+
+      - name: Guard — the package version must be an unreleased tag
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag v${VERSION} already exists. Bump \"version\" in package.json before releasing." >&2
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
       - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
         with:
@@ -20,18 +32,31 @@ jobs:
           registry-url: https://registry.npmjs.org
       # Trusted Publishing (OIDC) requires npm >= 11.5.1; Node 22 ships npm 10.
       - run: npm install -g npm@latest
+
       - run: bun install --frozen-lockfile
       - run: bun run check:types
       - run: bun test
       - run: bun run build
       - run: bun run check:tarball
+
+      - name: Tag the release commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "v${VERSION}"
+          git push origin "v${VERSION}"
+
       # OIDC Trusted Publisher (configured on npmjs.com) — npm mints a short-lived
       # token from the id-token permission and attaches provenance. No NPM_TOKEN.
       - run: npm publish --access public --provenance
+
       - run: bun run build:binary
-      - name: Create the GitHub release with the macOS arm64 binary
-        run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          gh release create "v${VERSION}" raster --generate-notes --title "v${VERSION}"
+
+      - name: Publish the GitHub release with the macOS arm64 binary
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          mv raster "raster-${VERSION}-darwin-arm64"
+          gh release create "v${VERSION}" \
+            "raster-${VERSION}-darwin-arm64" \
+            --verify-tag --generate-notes --title "v${VERSION}"
