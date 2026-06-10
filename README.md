@@ -8,10 +8,10 @@ Command-line client for the [Raster](https://raster.app) API. Browse, search, up
 npm install -g @raster-app/cli
 ```
 
-Run ad hoc without installing:
+Run a single command without installing — the binary is `raster`:
 
 ```sh
-npx @raster-app/cli whoami
+npx -p @raster-app/cli raster whoami
 ```
 
 A standalone macOS (Apple Silicon) binary ships with each [GitHub release](https://github.com/raster-app/raster-cli/releases) — no Node required.
