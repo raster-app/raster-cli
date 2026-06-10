@@ -11,6 +11,9 @@ const CONFIG_DIR_MODE = 0o700;
 
 const configSchema = z.object({
   apiKey: z.string().min(1).optional(),
+  // Scope cached at login so commands resolve org/library without an extra /me.
+  organizationId: z.string().min(1).optional(),
+  libraries: z.array(z.string()).optional(),
 });
 
 export type CliConfig = z.infer<typeof configSchema>;

@@ -39,12 +39,7 @@ const SEARCH_HIT_COLUMNS: Array<TableColumn<SearchHitRecord>> = [
   { header: "LIBRARY", value: (hit) => hit.libraryId ?? "" },
 ];
 
-const inLibraryOptionsSchema = z.object({
-  org: z.string().min(1),
-  library: z.string().min(1),
-});
-
-const listOptionsSchema = inLibraryOptionsSchema.extend({
+const listOptionsSchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).optional(),
   tag: z.array(z.string().min(1)).default([]),
@@ -58,11 +53,13 @@ export async function listAssetsCommand(
     throw new ValidationError(`At most ${MAX_TAGS_PER_QUERY} --tag filters are supported per query.`);
   }
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
+  const libraryId = await context.resolveLibrary();
   const client = context.clientFactory();
   const assets = await unwrapResult(() =>
     client.GET("/organizations/{organizationId}/libraries/{libraryId}/assets", {
       params: {
-        path: { organizationId: options.org, libraryId: options.library },
+        path: { organizationId, libraryId },
         header: VERSION_HEADER,
         query: {
           page: options.page,
@@ -79,15 +76,9 @@ export async function listAssetsCommand(
   renderTable(context, assets, ASSET_COLUMNS);
 }
 
-const getOptionsSchema = inLibraryOptionsSchema;
-
-export async function getAssetCommand(
-  context: CommandContext,
-  assetId: string,
-  options: z.infer<typeof getOptionsSchema>,
-): Promise<void> {
+export async function getAssetCommand(context: CommandContext, assetId: string): Promise<void> {
   requireApiKey(context);
-  const asset = await fetchAsset(context, options.org, options.library, assetId);
+  const asset = await fetchAsset(context, assetId);
   if (context.json) {
     printJson(context, asset);
     return;
@@ -104,12 +95,9 @@ export async function getAssetCommand(
   ]);
 }
 
-async function fetchAsset(
-  context: CommandContext,
-  organizationId: string,
-  libraryId: string,
-  assetId: string,
-): Promise<AssetRecord> {
+async function fetchAsset(context: CommandContext, assetId: string): Promise<AssetRecord> {
+  const organizationId = await context.resolveOrg();
+  const libraryId = await context.resolveLibrary();
   const client = context.clientFactory();
   return unwrapResult(() =>
     client.GET("/organizations/{organizationId}/libraries/{libraryId}/assets/{assetId}", {
@@ -119,8 +107,6 @@ async function fetchAsset(
 }
 
 const searchOptionsSchema = z.object({
-  org: z.string().min(1),
-  library: z.array(z.string().min(1)).default([]),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).optional(),
 });
@@ -131,15 +117,16 @@ export async function searchAssetsCommand(
   options: z.infer<typeof searchOptionsSchema>,
 ): Promise<void> {
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
   const client = context.clientFactory();
   const result = await unwrapResult(() =>
     client.GET("/organizations/{organizationId}/search/assets", {
       params: {
-        path: { organizationId: options.org },
+        path: { organizationId },
         header: VERSION_HEADER,
         query: {
           q: query,
-          libraries: options.library.length > 0 ? options.library.join(",") : undefined,
+          libraries: context.explicitLibrary,
           page: options.page,
           pageSize: options.pageSize,
         },
@@ -154,7 +141,7 @@ export async function searchAssetsCommand(
   renderTable(context, result.hits, SEARCH_HIT_COLUMNS);
 }
 
-const downloadOptionsSchema = inLibraryOptionsSchema.extend({
+const downloadOptionsSchema = z.object({
   output: z.string().min(1).optional(),
   force: z.boolean().default(false),
 });
@@ -165,7 +152,7 @@ export async function downloadAssetCommand(
   options: z.infer<typeof downloadOptionsSchema>,
 ): Promise<void> {
   requireApiKey(context);
-  const asset = await fetchAsset(context, options.org, options.library, assetId);
+  const asset = await fetchAsset(context, assetId);
   const fileUrl = asset.url;
   if (!fileUrl) throw new CliError("Asset has no file URL to download.", EXIT_CODES.generic);
   const targetPath = options.output ?? asset.name ?? assetId;
@@ -188,15 +175,11 @@ const uploadedAssetsSchema = z.object({
   assets: z.array(z.looseObject({ id: z.string().optional(), name: z.string().nullish() })),
 });
 
-const uploadOptionsSchema = inLibraryOptionsSchema;
-
-export async function uploadAssetsCommand(
-  context: CommandContext,
-  files: string[],
-  options: z.infer<typeof uploadOptionsSchema>,
-): Promise<void> {
+export async function uploadAssetsCommand(context: CommandContext, files: string[]): Promise<void> {
   if (files.length === 0) throw new UsageError("Provide at least one file to upload.");
   const { key } = requireApiKey(context);
+  const organizationId = await context.resolveOrg();
+  const libraryId = await context.resolveLibrary();
   const batches = chunk(files, MAX_UPLOAD_FILES);
   const uploadedNames: string[] = [];
   const payloads: unknown[] = [];
@@ -219,7 +202,7 @@ export async function uploadAssetsCommand(
       note(context, `Uploading batch ${batchIndex + 1}/${batches.length} (${batch.length} files)…`);
     }
     const response = await context.fetch(
-      `${context.baseUrl}/organizations/${options.org}/libraries/${options.library}/assets`,
+      `${context.baseUrl}/organizations/${organizationId}/libraries/${libraryId}/assets`,
       { method: "POST", headers: buildRequestHeaders(key), body: formData },
     );
     const payload = await parseEnvelope(response);
@@ -239,7 +222,7 @@ export async function uploadAssetsCommand(
   }
 }
 
-const removeOptionsSchema = inLibraryOptionsSchema.extend({
+const removeOptionsSchema = z.object({
   yes: z.boolean().default(false),
 });
 
@@ -253,6 +236,8 @@ export async function removeAssetsCommand(
     throw new ValidationError(`At most ${MAX_DELETE_IDS} asset ids are supported per call.`);
   }
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
+  const libraryId = await context.resolveLibrary();
   if (!options.yes && context.isInteractive) {
     const confirmed = await context.confirm(`Move ${assetIds.length} asset(s) to trash?`);
     if (!confirmed) {
@@ -263,10 +248,7 @@ export async function removeAssetsCommand(
   const client = context.clientFactory();
   const result = await unwrapResult(() =>
     client.DELETE("/organizations/{organizationId}/libraries/{libraryId}/assets", {
-      params: {
-        path: { organizationId: options.org, libraryId: options.library },
-        header: VERSION_HEADER,
-      },
+      params: { path: { organizationId, libraryId }, header: VERSION_HEADER },
       body: { ids: assetIds },
     }),
   );
@@ -277,7 +259,7 @@ export async function removeAssetsCommand(
   note(context, `Moved ${assetIds.length} asset(s) to trash. They are recoverable from the library trash.`);
 }
 
-const describeOptionsSchema = inLibraryOptionsSchema.extend({
+const describeOptionsSchema = z.object({
   text: z.string().min(1),
 });
 
@@ -287,11 +269,13 @@ export async function describeAssetCommand(
   options: z.infer<typeof describeOptionsSchema>,
 ): Promise<void> {
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
+  const libraryId = await context.resolveLibrary();
   const client = context.clientFactory();
   const asset = await unwrapResult(() =>
     client.PATCH("/organizations/{organizationId}/libraries/{libraryId}/assets/{assetId}/description", {
       params: {
-        path: { organizationId: options.org, libraryId: options.library, assetId },
+        path: { organizationId, libraryId, assetId },
         header: VERSION_HEADER,
       },
       body: { description: options.text },
@@ -304,40 +288,38 @@ export async function describeAssetCommand(
   note(context, "Description updated.");
 }
 
-const transferOptionsSchema = inLibraryOptionsSchema.extend({
+const transferOptionsSchema = z.object({
   to: z.string().min(1),
-  asset: z.array(z.string().min(1)).min(1),
 });
 
 export async function transferAssetsCommand(
   context: CommandContext,
+  assetIds: string[],
   options: z.infer<typeof transferOptionsSchema>,
 ): Promise<void> {
+  if (assetIds.length === 0) throw new UsageError("Provide at least one asset id.");
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
+  const libraryId = await context.resolveLibrary();
   const client = context.clientFactory();
   const result = await unwrapResult(() =>
     client.POST("/organizations/{organizationId}/libraries/{libraryId}/assets/transfer", {
-      params: {
-        path: { organizationId: options.org, libraryId: options.library },
-        header: VERSION_HEADER,
-      },
-      body: { targetLibraryId: options.to, assetIds: options.asset },
+      params: { path: { organizationId, libraryId }, header: VERSION_HEADER },
+      body: { targetLibraryId: options.to, assetIds },
     }),
   );
   if (context.json) {
     printJson(context, result);
     return;
   }
-  note(context, `Transferred ${options.asset.length} asset(s) to library ${options.to}.`);
+  note(context, `Transferred ${assetIds.length} asset(s) to library ${options.to}.`);
 }
 
 export function registerAssetCommands(program: Command, runAction: ActionRunner): void {
   const assets = program.command("assets").description("Work with assets in a library");
   assets
     .command("ls")
-    .description("List assets in a library")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Library id")
+    .description("List assets in the library")
     .option("--page <number>", "Page number (1-based)")
     .option("--page-size <number>", "Results per page")
     .option("--tag <tag...>", "Filter by tag (repeatable, up to 5)")
@@ -348,17 +330,13 @@ export function registerAssetCommands(program: Command, runAction: ActionRunner)
     .command("get")
     .description("Show a single asset")
     .argument("<assetId>", "Asset id")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Library id")
-    .action((assetId: string, options, command: Command) =>
-      runAction(command, (context) => getAssetCommand(context, assetId, parseOptions(getOptionsSchema, options))),
+    .action((assetId: string, _options, command: Command) =>
+      runAction(command, (context) => getAssetCommand(context, assetId)),
     );
   assets
     .command("search")
-    .description("Search assets across the organization")
+    .description("Search assets across the organization (pass --library to scope to one)")
     .argument("<query>", "Search query")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .option("--library <libraryId...>", "Restrict to specific libraries (repeatable)")
     .option("--page <number>", "Page number (1-based)")
     .option("--page-size <number>", "Results per page")
     .action((query: string, options, command: Command) =>
@@ -370,8 +348,6 @@ export function registerAssetCommands(program: Command, runAction: ActionRunner)
     .command("download")
     .description("Download an asset's file")
     .argument("<assetId>", "Asset id")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Library id")
     .option("-o, --output <path>", "Target file path")
     .option("--force", "Overwrite the target file if it exists")
     .action((assetId: string, options, command: Command) =>
@@ -383,19 +359,13 @@ export function registerAssetCommands(program: Command, runAction: ActionRunner)
     .command("upload")
     .description("Upload local files as assets")
     .argument("<files...>", "Local file paths")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Library id")
-    .action((files: string[], options, command: Command) =>
-      runAction(command, (context) =>
-        uploadAssetsCommand(context, files, parseOptions(uploadOptionsSchema, options)),
-      ),
+    .action((files: string[], _options, command: Command) =>
+      runAction(command, (context) => uploadAssetsCommand(context, files)),
     );
   assets
     .command("rm")
     .description("Move assets to trash (recoverable)")
     .argument("<assetIds...>", "Asset ids")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Library id")
     .option("--yes", "Skip the confirmation prompt")
     .action((assetIds: string[], options, command: Command) =>
       runAction(command, (context) =>
@@ -406,8 +376,6 @@ export function registerAssetCommands(program: Command, runAction: ActionRunner)
     .command("describe")
     .description("Set an asset's description")
     .argument("<assetId>", "Asset id")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Library id")
     .requiredOption("--text <description>", "Description text")
     .action((assetId: string, options, command: Command) =>
       runAction(command, (context) =>
@@ -417,13 +385,11 @@ export function registerAssetCommands(program: Command, runAction: ActionRunner)
   assets
     .command("transfer")
     .description("Move assets to another library")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Source library id")
+    .argument("<assetIds...>", "Asset ids to move")
     .requiredOption("--to <libraryId>", "Target library id")
-    .requiredOption("--asset <assetId...>", "Asset ids (repeatable)")
-    .action((options, command: Command) =>
+    .action((assetIds: string[], options, command: Command) =>
       runAction(command, (context) =>
-        transferAssetsCommand(context, parseOptions(transferOptionsSchema, options)),
+        transferAssetsCommand(context, assetIds, parseOptions(transferOptionsSchema, options)),
       ),
     );
 }

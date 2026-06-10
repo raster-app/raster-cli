@@ -12,6 +12,8 @@ import { CliError, EXIT_CODES } from "./lib/errors";
 
 const globalOptionsSchema = z.object({
   apiKey: z.string().optional(),
+  org: z.string().optional(),
+  library: z.string().optional(),
   json: z.boolean().optional(),
   verbose: z.boolean().optional(),
 });
@@ -47,6 +49,8 @@ program
   .description("Command-line client for the Raster API")
   .version(`${packageJson.version} (Api-Version ${API_VERSION})`, "-V, --version", "Print the CLI version and the pinned Api-Version")
   .option("--api-key <key>", "API key (overrides RASTER_API_KEY and the config file)")
+  .option("--org <organizationId>", "Organization id (derived from the API key when omitted)")
+  .option("--library <libraryId>", "Library id (derived from the API key when it has one library)")
   .option("--json", "Print machine-readable JSON to stdout")
   .option("--verbose", "Log requests to stderr (keys masked)")
   .exitOverride();

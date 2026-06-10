@@ -1,6 +1,13 @@
 import type { Command } from "commander";
 import { z } from "zod";
-import { createApiClient, validateBaseUrl, type ApiClient, type FetchLike } from "../api/client";
+import {
+  createApiClient,
+  unwrapResult,
+  validateBaseUrl,
+  VERSION_HEADER,
+  type ApiClient,
+  type FetchLike,
+} from "../api/client";
 import { DEFAULT_BASE_URL } from "../api/version";
 import { readConfig, resolveApiKey, type ResolvedApiKey } from "../config";
 import { ApiError, AuthSetupError, CliError, EXIT_CODES, UsageError } from "./errors";
@@ -17,12 +24,29 @@ export type CommandContext = OutputContext & {
   clientFactory: (overrides?: { apiKey: string | null }) => ApiClient;
   confirm: (message: string) => Promise<boolean>;
   promptSecret: (message: string) => Promise<string | null>;
+  // Resolve the target org/library from --org/--library, else the scope cached at
+  // login, else one /me fallback. resolveLibrary requires --library when the key
+  // spans many.
+  resolveOrg: () => Promise<string>;
+  resolveLibrary: () => Promise<string>;
+  // Raw --library, undefined when omitted — for org-wide commands (search) that
+  // treat a library as an optional filter rather than a required target.
+  explicitLibrary: string | undefined;
 };
 
 export type GlobalOptions = {
   apiKey?: string | undefined;
+  org?: string | undefined;
+  library?: string | undefined;
   json?: boolean | undefined;
   verbose?: boolean | undefined;
+};
+
+type Viewer = {
+  organizationId?: string;
+  organizationName?: string | null;
+  plan?: string | null;
+  libraries?: Array<string | null>;
 };
 
 export type ContextOverrides = {
@@ -51,6 +75,27 @@ export async function createCommandContext(
   const baseUrl = validateBaseUrl(env.RASTER_API_BASE_URL ?? DEFAULT_BASE_URL);
   const baseFetch = overrides.fetch ?? globalThis.fetch;
   const instrumentedFetch = instrumentFetch(baseFetch, output, apiKey ? maskApiKey(apiKey.key) : null);
+  const clientFactory = (clientOverrides?: { apiKey: string | null }): ApiClient =>
+    createApiClient({
+      baseUrl,
+      apiKey: clientOverrides ? clientOverrides.apiKey : (apiKey?.key ?? null),
+      fetch: instrumentedFetch,
+    });
+  // One /me lookup per run, shared by org and library resolution.
+  let viewerPromise: Promise<Viewer> | null = null;
+  const loadViewer = (): Promise<Viewer> => {
+    if (!viewerPromise) {
+      if (!apiKey) {
+        throw new AuthSetupError("No API key found. Run `raster auth login` or set RASTER_API_KEY.");
+      }
+      viewerPromise = unwrapResult(() =>
+        clientFactory({ apiKey: apiKey.key }).GET("/me", { params: { header: VERSION_HEADER } }),
+      );
+    }
+    return viewerPromise;
+  };
+  // The cached scope belongs to one key; ignore it when a different key is active.
+  const cacheMatchesKey = config.apiKey !== undefined && apiKey?.key === config.apiKey;
   return {
     ...output,
     env,
@@ -58,14 +103,36 @@ export async function createCommandContext(
     isInteractive: overrides.isInteractive ?? process.stdin.isTTY === true,
     apiKey,
     fetch: instrumentedFetch,
-    clientFactory: (clientOverrides) =>
-      createApiClient({
-        baseUrl,
-        apiKey: clientOverrides ? clientOverrides.apiKey : (apiKey?.key ?? null),
-        fetch: instrumentedFetch,
-      }),
+    clientFactory,
     confirm: overrides.confirm ?? promptConfirm,
     promptSecret: overrides.promptSecret ?? promptSecret,
+    explicitLibrary: globals.library,
+    resolveOrg: async () => {
+      if (globals.org) return globals.org;
+      // The org is immutable per key, so the cached value is always valid for it.
+      if (cacheMatchesKey && config.organizationId) return config.organizationId;
+      const viewer = await loadViewer();
+      if (!viewer.organizationId) {
+        throw new CliError("Could not determine the organization from the API key.", EXIT_CODES.generic);
+      }
+      return viewer.organizationId;
+    },
+    resolveLibrary: async () => {
+      if (globals.library) return globals.library;
+      // Library access can change after login; the cache is a hint and the API
+      // is the enforcer. Re-run `auth login` to refresh, or pass --library.
+      const cachedLibraries = cacheMatchesKey ? config.libraries : undefined;
+      const source = cachedLibraries ?? (await loadViewer()).libraries ?? [];
+      const libraries = source.filter((value): value is string => typeof value === "string");
+      const onlyLibrary = libraries[0];
+      if (libraries.length === 1 && onlyLibrary) return onlyLibrary;
+      if (libraries.length === 0) {
+        throw new AuthSetupError("The API key has no library access.");
+      }
+      throw new UsageError(
+        `The API key can access ${libraries.length} libraries (${libraries.join(", ")}). Pass --library <id>.`,
+      );
+    },
   };
 }
 

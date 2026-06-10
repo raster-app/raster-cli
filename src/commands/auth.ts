@@ -1,9 +1,7 @@
 import type { Command } from "commander";
-import { z } from "zod";
 import { unwrapResult, VERSION_HEADER } from "../api/client";
 import { configPath, readConfig, writeConfig } from "../config";
 import {
-  parseOptions,
   requireApiKey,
   type ActionRunner,
   type CommandContext,
@@ -19,24 +17,31 @@ export async function fetchViewer(context: CommandContext, apiKey: string) {
 
 type Viewer = Awaited<ReturnType<typeof fetchViewer>>;
 
-const loginOptionsSchema = z.object({
-  apiKey: z.string().min(1).optional(),
-});
-
-export async function loginCommand(context: CommandContext, options: { apiKey?: string }): Promise<void> {
-  const promptedKey = options.apiKey ?? (context.isInteractive ? await context.promptSecret("Paste your Raster API key") : null);
-  if (!promptedKey) {
+export async function loginCommand(context: CommandContext): Promise<void> {
+  // Only an explicit --api-key is stored; an ambient env/config key prompts instead.
+  const flagKey = context.apiKey?.source === "flag" ? context.apiKey.key : null;
+  const key = flagKey ?? (context.isInteractive ? await context.promptSecret("Paste your Raster API key") : null);
+  if (!key) {
     throw new UsageError("Provide a key with --api-key, or run `raster auth login` in an interactive terminal.");
   }
-  const viewer = await fetchViewer(context, promptedKey);
+  const viewer = await fetchViewer(context, key);
   const config = await readConfig(context.env);
-  await writeConfig({ ...config, apiKey: promptedKey }, context.env);
+  // Cache the key's scope so later commands skip the /me round-trip.
+  await writeConfig(
+    {
+      ...config,
+      apiKey: key,
+      organizationId: viewer?.organizationId,
+      libraries: (viewer?.libraries ?? []).filter((library): library is string => typeof library === "string"),
+    },
+    context.env,
+  );
   if (context.json) {
     printJson(context, viewer);
     return;
   }
   const organizationLabel = viewer?.organizationName ?? viewer?.organizationId ?? "your organization";
-  note(context, `Logged in to ${organizationLabel} as ${maskApiKey(promptedKey)}. Key stored in ${configPath(context.env)}.`);
+  note(context, `Logged in to ${organizationLabel} as ${maskApiKey(key)}. Key stored in ${configPath(context.env)}.`);
 }
 
 export async function logoutCommand(context: CommandContext): Promise<void> {
@@ -99,11 +104,8 @@ export function registerAuthCommands(program: Command, runAction: ActionRunner):
   const auth = program.command("auth").description("Manage CLI authentication");
   auth
     .command("login")
-    .description("Validate an API key against the API and store it")
-    .option("--api-key <key>", "API key to store (prompts when omitted)")
-    .action((options, command: Command) =>
-      runAction(command, (context) => loginCommand(context, parseOptions(loginOptionsSchema, options))),
-    );
+    .description("Validate an API key against the API and store it (pass --api-key, or run interactively to be prompted)")
+    .action((_options, command: Command) => runAction(command, (context) => loginCommand(context)));
   auth
     .command("logout")
     .description("Remove the stored API key")

@@ -24,11 +24,14 @@ const VIEWER = {
 describe("auth login", () => {
   test("Req 2.2: validates via GET /me and stores the key with 0600 permissions", async () => {
     const { fetchImpl, requests } = createMockFetch(jsonRoute("GET", "/me", 200, dataEnvelope(VIEWER)));
-    const { context, env } = await createTestContext({ fetch: fetchImpl });
-    await loginCommand(context, { apiKey: TEST_API_KEY });
+    const { context, env } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
+    await loginCommand(context);
     expect(requests.length).toBe(1);
     const config = await readConfig(env);
     expect(config.apiKey).toBe(TEST_API_KEY);
+    // Scope is cached so later commands skip /me.
+    expect(config.organizationId).toBe("org_1");
+    expect(config.libraries).toEqual(["lib_1", "lib_2"]);
     const stats = await stat(configPath(env));
     expect(stats.mode & 0o777).toBe(CONFIG_FILE_MODE);
   });
@@ -40,16 +43,30 @@ describe("auth login", () => {
       isInteractive: true,
       promptSecret: async () => TEST_API_KEY,
     });
-    await loginCommand(context, {});
+    await loginCommand(context);
     expect((await readConfig(env)).apiKey).toBe(TEST_API_KEY);
+  });
+
+  test("Req 2.2: an ambient env key is not auto-stored — login prompts and stores the entered key", async () => {
+    const env = await createTestEnv({ RASTER_API_KEY: "pk_ambient_env_key" });
+    const { fetchImpl } = createMockFetch(jsonRoute("GET", "/me", 200, dataEnvelope(VIEWER)));
+    const enteredKey = `pk_${"p".repeat(45)}`;
+    const { context } = await createTestContext({
+      env,
+      fetch: fetchImpl,
+      isInteractive: true,
+      promptSecret: async () => enteredKey,
+    });
+    await loginCommand(context);
+    expect((await readConfig(env)).apiKey).toBe(enteredKey);
   });
 
   test("Req 2.3: a rejected key writes nothing, surfaces the API message, exits 3", async () => {
     const { fetchImpl } = createMockFetch(
       jsonRoute("GET", "/me", 401, errorEnvelopeBody("UNAUTHENTICATED", "Invalid API key.")),
     );
-    const { context, env, stderrLines } = await createTestContext({ fetch: fetchImpl });
-    const exitCode = await executeCommand(context, () => loginCommand(context, { apiKey: TEST_API_KEY }));
+    const { context, env, stderrLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
+    const exitCode = await executeCommand(context, () => loginCommand(context));
     expect(exitCode).toBe(EXIT_CODES.auth);
     expect(stderrLines.join("")).toContain("Invalid API key.");
     expect((await readConfig(env)).apiKey).toBeUndefined();
@@ -58,7 +75,7 @@ describe("auth login", () => {
   test("Req 2.2: non-interactive login without --api-key is a usage error", async () => {
     const { fetchImpl, requests } = createMockFetch();
     const { context } = await createTestContext({ fetch: fetchImpl, isInteractive: false });
-    const exitCode = await executeCommand(context, () => loginCommand(context, {}));
+    const exitCode = await executeCommand(context, () => loginCommand(context));
     expect(exitCode).toBe(EXIT_CODES.usage);
     expect(requests.length).toBe(0);
   });

@@ -76,6 +76,8 @@ export type TestContextOptions = {
   json?: boolean;
   verbose?: boolean;
   flagApiKey?: string;
+  org?: string;
+  library?: string;
   isInteractive?: boolean;
   confirm?: (message: string) => Promise<boolean>;
   promptSecret?: (message: string) => Promise<string | null>;
@@ -93,7 +95,13 @@ export async function createTestContext(options: TestContextOptions = {}): Promi
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
   const context = await createCommandContext(
-    { apiKey: options.flagApiKey, json: options.json, verbose: options.verbose },
+    {
+      apiKey: options.flagApiKey,
+      org: options.org,
+      library: options.library,
+      json: options.json,
+      verbose: options.verbose,
+    },
     {
       env,
       fetch: options.fetch,

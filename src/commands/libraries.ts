@@ -21,7 +21,6 @@ const LIBRARY_COLUMNS: Array<TableColumn<LibraryRecord>> = [
 ];
 
 const listOptionsSchema = z.object({
-  org: z.string().min(1),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).optional(),
 });
@@ -31,11 +30,12 @@ export async function listLibrariesCommand(
   options: z.infer<typeof listOptionsSchema>,
 ): Promise<void> {
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
   const client = context.clientFactory();
   const libraries = await unwrapResult(() =>
     client.GET("/organizations/{organizationId}/libraries", {
       params: {
-        path: { organizationId: options.org },
+        path: { organizationId },
         header: VERSION_HEADER,
         query: { page: options.page, pageSize: options.pageSize },
       },
@@ -49,7 +49,6 @@ export async function listLibrariesCommand(
 }
 
 const createOptionsSchema = z.object({
-  org: z.string().min(1),
   name: z.string().min(1),
   slug: z.string().min(1).optional(),
 });
@@ -59,10 +58,11 @@ export async function createLibraryCommand(
   options: z.infer<typeof createOptionsSchema>,
 ): Promise<void> {
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
   const client = context.clientFactory();
   const library = await unwrapResult(() =>
     client.POST("/organizations/{organizationId}/libraries", {
-      params: { path: { organizationId: options.org }, header: VERSION_HEADER },
+      params: { path: { organizationId }, header: VERSION_HEADER },
       body: { name: options.name, slug: options.slug },
     }),
   );
@@ -78,8 +78,6 @@ export async function createLibraryCommand(
 }
 
 const renameOptionsSchema = z.object({
-  org: z.string().min(1),
-  library: z.string().min(1),
   name: z.string().min(1),
 });
 
@@ -88,11 +86,13 @@ export async function renameLibraryCommand(
   options: z.infer<typeof renameOptionsSchema>,
 ): Promise<void> {
   requireApiKey(context);
+  const organizationId = await context.resolveOrg();
+  const libraryId = await context.resolveLibrary();
   const client = context.clientFactory();
   const library = await unwrapResult(() =>
     client.PATCH("/organizations/{organizationId}/libraries/{libraryId}", {
       params: {
-        path: { organizationId: options.org, libraryId: options.library },
+        path: { organizationId, libraryId },
         header: VERSION_HEADER,
       },
       body: { name: options.name },
@@ -109,8 +109,7 @@ export function registerLibraryCommands(program: Command, runAction: ActionRunne
   const libraries = program.command("libraries").description("Work with libraries");
   libraries
     .command("ls")
-    .description("List libraries in an organization")
-    .requiredOption("--org <organizationId>", "Organization id")
+    .description("List libraries in the organization")
     .option("--page <number>", "Page number (1-based)")
     .option("--page-size <number>", "Results per page")
     .action((options, command: Command) =>
@@ -119,7 +118,6 @@ export function registerLibraryCommands(program: Command, runAction: ActionRunne
   libraries
     .command("create")
     .description("Create a library")
-    .requiredOption("--org <organizationId>", "Organization id")
     .requiredOption("--name <name>", "Library name")
     .option("--slug <slug>", "URL slug for the library")
     .action((options, command: Command) =>
@@ -127,9 +125,7 @@ export function registerLibraryCommands(program: Command, runAction: ActionRunne
     );
   libraries
     .command("rename")
-    .description("Rename a library")
-    .requiredOption("--org <organizationId>", "Organization id")
-    .requiredOption("--library <libraryId>", "Library id")
+    .description("Rename the library (the one the key scopes to, or pass --library)")
     .requiredOption("--name <name>", "New library name")
     .action((options, command: Command) =>
       runAction(command, (context) => renameLibraryCommand(context, parseOptions(renameOptionsSchema, options))),

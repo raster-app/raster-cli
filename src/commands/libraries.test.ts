@@ -18,8 +18,8 @@ describe("libraries ls", () => {
   test("Req 4.1: renders the returned libraries and forwards pagination", async () => {
     const libraries = [{ id: "lib_1", name: "Brand", assetsCount: 12, trashCount: 1, tags: [] }];
     const { fetchImpl, requests } = createMockFetch(jsonRoute("GET", LIBRARIES_PATH, 200, dataEnvelope(libraries)));
-    const { context, stdoutLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
-    await listLibrariesCommand(context, { org: ORG, page: 2, pageSize: 5 });
+    const { context, stdoutLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY, org: ORG });
+    await listLibrariesCommand(context, { page: 2, pageSize: 5 });
     const url = new URL(requests[0]?.url ?? "");
     expect(url.searchParams.get("page")).toBe("2");
     expect(url.searchParams.get("pageSize")).toBe("5");
@@ -32,8 +32,8 @@ describe("libraries ls", () => {
     const { fetchImpl } = createMockFetch(
       jsonRoute("GET", LIBRARIES_PATH, 401, errorEnvelopeBody("UNAUTHENTICATED", "Invalid API key.")),
     );
-    const { context, stderrLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
-    const exitCode = await executeCommand(context, () => listLibrariesCommand(context, { org: ORG }));
+    const { context, stderrLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY, org: ORG });
+    const exitCode = await executeCommand(context, () => listLibrariesCommand(context, {}));
     expect(exitCode).toBe(EXIT_CODES.auth);
     expect(stderrLines.join("")).toContain("Invalid API key.");
   });
@@ -44,8 +44,8 @@ describe("libraries create", () => {
     const { fetchImpl, requests } = createMockFetch(
       jsonRoute("POST", LIBRARIES_PATH, 201, dataEnvelope({ id: "lib_new", name: "Marketing" })),
     );
-    const { context, stdoutLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
-    await createLibraryCommand(context, { org: ORG, name: "Marketing", slug: "marketing" });
+    const { context, stdoutLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY, org: ORG });
+    await createLibraryCommand(context, { name: "Marketing", slug: "marketing" });
     const body: unknown = JSON.parse((await requests[0]?.text()) ?? "");
     expect(body).toEqual({ name: "Marketing", slug: "marketing" });
     expect(stdoutLines.join("")).toContain("lib_new");
@@ -55,9 +55,9 @@ describe("libraries create", () => {
     const { fetchImpl } = createMockFetch(
       jsonRoute("POST", LIBRARIES_PATH, 409, errorEnvelopeBody("CONFLICT", "Library URL already exists.")),
     );
-    const { context, stderrLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
+    const { context, stderrLines } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY, org: ORG });
     const exitCode = await executeCommand(context, () =>
-      createLibraryCommand(context, { org: ORG, name: "Marketing", slug: "marketing" }),
+      createLibraryCommand(context, { name: "Marketing", slug: "marketing" }),
     );
     expect(exitCode).toBe(EXIT_CODES.validation);
     expect(stderrLines.join("")).toContain("Library URL already exists.");
@@ -65,12 +65,17 @@ describe("libraries create", () => {
 });
 
 describe("libraries rename", () => {
-  test("Req 4.3: sends { name } to the library PATCH endpoint", async () => {
+  test("Req 4.3: sends { name } to the resolved library", async () => {
     const { fetchImpl, requests } = createMockFetch(
       jsonRoute("PATCH", `${LIBRARIES_PATH}/lib_1`, 200, dataEnvelope({ id: "lib_1", name: "Renamed" })),
     );
-    const { context } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
-    await renameLibraryCommand(context, { org: ORG, library: "lib_1", name: "Renamed" });
+    const { context } = await createTestContext({
+      fetch: fetchImpl,
+      flagApiKey: TEST_API_KEY,
+      org: ORG,
+      library: "lib_1",
+    });
+    await renameLibraryCommand(context, { name: "Renamed" });
     const body: unknown = JSON.parse((await requests[0]?.text()) ?? "");
     expect(body).toEqual({ name: "Renamed" });
   });

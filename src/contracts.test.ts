@@ -141,8 +141,13 @@ describe("Property 6: uploads never exceed the per-request cap", () => {
     const { fetchImpl, requests } = createMockFetch(
       jsonRoute("POST", "/organizations/org_1/libraries/lib_1/assets", 200, dataEnvelope({ assets: [] })),
     );
-    const { context } = await createTestContext({ fetch: fetchImpl, flagApiKey: TEST_API_KEY });
-    await uploadAssetsCommand(context, files, { org: "org_1", library: "lib_1" });
+    const { context } = await createTestContext({
+      fetch: fetchImpl,
+      flagApiKey: TEST_API_KEY,
+      org: "org_1",
+      library: "lib_1",
+    });
+    await uploadAssetsCommand(context, files);
     expect(requests.length).toBe(2);
   });
 });
