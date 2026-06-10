@@ -5,7 +5,7 @@ import type { FetchLike } from "./api/client";
 import { createCommandContext, type CommandContext } from "./lib/context";
 
 // Reserved .test TLD (RFC 6761) — never resolves; all fetches here are mocked.
-export const TEST_BASE_URL = "https://api.raster.test";
+export const TEST_BASE_URL = "https://api.raster.app";
 export const TEST_API_KEY = `pk_${"a".repeat(45)}`;
 
 export function jsonResponse(status: number, body: unknown): Response {

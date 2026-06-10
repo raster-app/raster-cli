@@ -139,7 +139,7 @@ Human-readable tables print to stdout; progress and notes go to stderr, so stdou
 | Variable | Purpose |
 | --- | --- |
 | `RASTER_API_KEY` | API key (overrides the config file) |
-| `RASTER_API_BASE_URL` | API origin override — https only, except localhost |
+| `RASTER_API_BASE_URL` | API origin override — https on a `raster.app` host, or localhost |
 | `RASTER_CONFIG_HOME` | Config directory override (default `~/.config/raster`) |
 
 ## Development

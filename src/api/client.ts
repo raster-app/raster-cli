@@ -8,6 +8,12 @@ export const VERSION_HEADER = { "Api-Version": API_VERSION } as const;
 
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
 
+function isRasterHost(hostname: string): boolean {
+  return hostname === "raster.app" || hostname.endsWith(".raster.app");
+}
+
+// The base URL only ever points at Raster (prod or a raster.app staging host) or
+// a local dev server. Anything else would send the API key to a foreign host.
 export function validateBaseUrl(rawUrl: string): string {
   let parsed: URL;
   try {
@@ -15,9 +21,12 @@ export function validateBaseUrl(rawUrl: string): string {
   } catch {
     throw new UsageError(`Invalid API base URL: ${rawUrl}`);
   }
-  if (parsed.protocol !== "https:" && !LOCAL_HOSTNAMES.has(parsed.hostname)) {
+  if (LOCAL_HOSTNAMES.has(parsed.hostname)) {
+    return rawUrl.replace(/\/+$/, "");
+  }
+  if (parsed.protocol !== "https:" || !isRasterHost(parsed.hostname)) {
     throw new UsageError(
-      `API base URL must use https (got ${rawUrl}). localhost and 127.0.0.1 are the only http exceptions.`,
+      `API base URL must be https on a raster.app host (got ${rawUrl}); localhost is allowed for development.`,
     );
   }
   return rawUrl.replace(/\/+$/, "");

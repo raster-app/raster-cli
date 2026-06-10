@@ -10,21 +10,30 @@ import { API_VERSION } from "./version";
 import { jsonResponse } from "../test-support";
 
 describe("validateBaseUrl", () => {
-  test("Req 3.3: accepts https origins", () => {
+  test("Req 3.3: accepts https on a raster.app host", () => {
     expect(validateBaseUrl("https://api.raster.app")).toBe("https://api.raster.app");
+    expect(validateBaseUrl("https://staging.raster.app")).toBe("https://staging.raster.app");
   });
 
   test("Req 3.3: strips trailing slashes", () => {
     expect(validateBaseUrl("https://api.raster.app/")).toBe("https://api.raster.app");
   });
 
-  test("Req 3.3: accepts http only for localhost and 127.0.0.1", () => {
+  test("Req 3.3: accepts localhost and 127.0.0.1 over http", () => {
     expect(validateBaseUrl("http://localhost:4000")).toBe("http://localhost:4000");
     expect(validateBaseUrl("http://127.0.0.1:4000")).toBe("http://127.0.0.1:4000");
   });
 
-  test("Req 3.3: rejects http for other hosts", () => {
+  test("Req 3.3: rejects http for raster hosts", () => {
     expect(() => validateBaseUrl("http://api.raster.app")).toThrow(UsageError);
+  });
+
+  test("Req 3.3: rejects non-raster https hosts", () => {
+    expect(() => validateBaseUrl("https://evil.example.com")).toThrow(UsageError);
+  });
+
+  test("Req 3.3: rejects raster.app lookalike hosts", () => {
+    expect(() => validateBaseUrl("https://raster.app.evil.com")).toThrow(UsageError);
   });
 
   test("Req 3.3: rejects unparseable URLs", () => {
