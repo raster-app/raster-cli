@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    # arm64 runner — compiles the darwin-arm64 binary natively (v1 target)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - run: bun run check:types
+      - run: bun test
+      - run: bun run build
+      - run: bun run check:tarball
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: bun run build:binary
+      - name: Create the GitHub release with the macOS arm64 binary
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          gh release create "v${VERSION}" raster --generate-notes --title "v${VERSION}"
+        env:
+          GH_TOKEN: ${{ github.token }}

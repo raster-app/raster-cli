@@ -1,0 +1,5 @@
+node_modules/
+dist/
+raster
+*.tgz
+.DS_Store

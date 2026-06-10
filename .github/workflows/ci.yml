@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run check:types
+      - run: bun test
+      - name: Contract drift — regenerate types from production and diff
+        run: |
+          bun run gen:types
+          git diff --exit-code src/api/openapi.d.ts
+      - run: bun run build
+      - run: bun run check:tarball
